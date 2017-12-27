@@ -1,0 +1,213 @@
+library(ggplot2)
+library(magrittr)
+library(tidyverse)
+library(corrplot)
+library(RColorBrewer)
+library(MASS)
+library(gridExtra)
+library(zoo)
+library(dplyr)
+library(randomForest)
+
+train<-read.csv("train.csv",header=TRUE)
+test<-read.csv("test.csv",header=TRUE)
+test.newcols<-as.data.frame(formation_energy_ev_natom = rep("NP", nrow(test)),bandgap_energy_ev=rep("NP",nrow(test)),test[,]) 
+test.newcols <- data.frame(formation_energy_ev_natom = rep("NP", nrow(test)), test[,])
+test.newcols.2<-data.frame(bandgap_energy_ev=rep("NP",nrow(test)),test.newcols[,])
+test.newcols.2[,3]<-test.newcols.2[,3]+2400
+data.combined<-rbind(train,test.newcols.2)
+
+EA_Al<--0.3125
+EA_Ga<--0.1081
+EA_In<--0.2563
+En_Al<-1.61
+En_Ga<-1.81
+En_In<-1.78
+IP_Al<--5.5374
+IP_Ga<--5.8182
+IP_In<--5.78
+HOMO_Al<--2.784
+HOMO_Ga<--2.732
+HOMO_In<--2.697
+LUMO_Al<-0.695
+LUMO_Ga<-0.13
+LUMO_In<-0.368
+rdmax_Al<-1.94
+rdmax_Ga<-2.16
+rdmax_In<-3.11
+rpmax_Al<-1.39
+rpmax_Ga<-1.33
+rpmax_In<- 1.5
+rsmax_Al<-1.09
+rsmax_Ga<-0.99
+rsmax_In<-1.13
+mass_Al<-26.9815386
+mass_Ga<-69.723
+mass_In<-114.818
+
+
+train.formation_E<-as.data.frame(train[,1:13])
+train.bandgap<-as.data.frame(train[,c(1,2,3,4,5,6,7,8,9,10,11,12,14)])
+#check missing values
+apply(train, 2, function(x) 
+  round(100 * (length(which(is.na(x))))/length(x) , digits = 1)) %>%
+  as.data.frame() %>%
+  `names<-`('Percent of Missing Values')
+
+#correlation for train.formation_E
+train.formation_E %>% 
+  dplyr::select(-id) %>%
+  cor(use = 'pairwise.complete.obs') -> M1
+
+corrplot(M1, type="lower", method="color",
+         col=brewer.pal(n=8, name="RdBu"),diag=FALSE)
+#correlation for train.bandgap
+train.bandgap %>% 
+  dplyr::select(-id) %>%
+  cor(use = 'pairwise.complete.obs') -> M2
+
+corrplot(M2, type="lower", method="color",
+         col=brewer.pal(n=8, name="RdBu"),diag=FALSE)
+
+sort(M1[ncol(M1),-ncol(M1)]) %>%  
+  as.data.frame %>% 
+  `names<-`('correlation') %>%
+  ggplot(aes(x = reorder(row.names(.), -correlation), y = correlation, fill = correlation)) + 
+  geom_bar(stat='identity', colour = 'black') + scale_fill_continuous(guide = FALSE) + scale_y_continuous(limits =  c(-.15,.25)) +
+  labs(title = 'formation_energy_ev_natom\n Correlations', x = NULL, y = NULL) + coord_flip() -> cor1
+
+sort(M2[ncol(M2),-ncol(M2)]) %>%  
+  as.data.frame %>% 
+  `names<-`('correlation') %>%
+  ggplot(aes(x = reorder(row.names(.), -correlation), y = correlation, fill = correlation)) + 
+  geom_bar(stat='identity', colour = 'black') + scale_fill_continuous(guide = FALSE) + scale_y_continuous(limits =  c(-.15,.25)) +
+  labs(title = 'bandgap_energy_ev\n Correlations', x = NULL, y = NULL) + coord_flip() -> cor2
+
+grid.arrange(cor1, cor2, nrow = 1)
+
+data.combined<-data.combined %>% mutate(EA_avg=EA_Al*percent_atom_al+EA_Ga*percent_atom_ga+EA_In*percent_atom_in)
+data.combined<-data.combined %>% mutate(IP_avg=IP_Al*percent_atom_al+IP_Ga*percent_atom_ga+IP_In*percent_atom_in)
+data.combined<-data.combined %>% mutate(En_avg=En_Al*percent_atom_ga+En_Ga*percent_atom_ga+En_In*percent_atom_in)
+data.combined<-data.combined %>% mutate(HOMO_avg=HOMO_Al*percent_atom_ga+HOMO_Ga*percent_atom_ga+HOMO_In*percent_atom_in)
+data.combined<-data.combined %>% mutate(LUMO_avg=LUMO_Al*percent_atom_ga+LUMO_Ga*percent_atom_ga+LUMO_In*percent_atom_in)
+data.combined<-data.combined %>% mutate(mass_avg=mass_Al*percent_atom_ga+mass_Ga*percent_atom_ga+mass_In*percent_atom_in)
+data.combined<-data.combined %>% mutate(rdmax_avg=rdmax_Al*percent_atom_ga+rdmax_Ga*percent_atom_ga+rdmax_In*percent_atom_in)
+data.combined<-data.combined %>% mutate(rsmax_avg=rsmax_Al*percent_atom_ga+rsmax_Ga*percent_atom_ga+rsmax_In*percent_atom_in)
+data.combined<-data.combined %>% mutate(rpmax_avg=rpmax_Al*percent_atom_ga+rpmax_Ga*percent_atom_ga+rpmax_In*percent_atom_in)
+
+data.combined<-data.combined %>% mutate(lattice_angle_alpha_rad=(pi*lattice_angle_alpha_degree)/180)
+data.combined<-data.combined %>% mutate(lattice_angle_beta_rad=(pi*lattice_angle_beta_degree)/180)
+data.combined<-data.combined %>% mutate(lattice_angle_gamma_rad=(pi*lattice_angle_gamma_degree)/180)
+summary(data.combined)
+
+str(data.combined)
+
+head(data.combined$lattice_angle_gamma_rad)
+
+head(data.combined$lattice_angle_gamma_rad)
+
+data.combined<-data.combined %>% mutate(vol=lattice_vector_1_ang*lattice_vector_2_ang*lattice_vector_3_ang*sqrt(1+2*cos(lattice_angle_alpha_rad)*cos(lattice_angle_beta_rad)*cos(lattice_angle_gamma_rad)-cos(lattice_angle_alpha_rad)**2-cos(lattice_angle_beta_rad)**2-cos(lattice_angle_gamma_rad)**2))
+
+data.combined<-data.combined %>% mutate(density=number_of_total_atoms/vol)
+
+train.modified<-as.data.frame(data.combined[1:2400,])
+
+train.bandgap.modified<-as.data.frame(train.modified[,c(1,2,3,4,5,6,7,8,9,10,11,12,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28)])
+train.formation.modified<-as.data.frame(train.modified[,c(1,2,3,4,5,6,7,8,9,10,11,12,13,15,16,17,18,19,20,21,22,23,24,25,26,27,28)])
+
+train.formation.modified %>% 
+  dplyr::select(-id) %>%
+  cor(use = 'pairwise.complete.obs') -> M11
+
+corrplot(M11, type="lower", method="color",
+         col=brewer.pal(n=8, name="RdBu"),diag=FALSE)
+#correlation for train.bandgap
+train.bandgap.modified %>% 
+  dplyr::select(-id) %>%
+  cor(use = 'pairwise.complete.obs') -> M22
+
+corrplot(M22, type="lower", method="color",
+         col=brewer.pal(n=8, name="RdBu"),diag=FALSE)
+
+sort(M11[ncol(M11),-ncol(M11)]) %>%  
+  as.data.frame %>% 
+  `names<-`('correlation') %>%
+  ggplot(aes(x = reorder(row.names(.), -correlation), y = correlation, fill = correlation)) + 
+  geom_bar(stat='identity', colour = 'black') + scale_fill_continuous(guide = FALSE) + scale_y_continuous(limits =  c(-.15,.25)) +
+  labs(title = 'formation_energy_ev_natom_modified\n Correlations', x = NULL, y = NULL) + coord_flip() -> cor11
+sort(M22[ncol(M22),-ncol(M22)]) %>%  
+  as.data.frame %>% 
+  `names<-`('correlation') %>%
+  ggplot(aes(x = reorder(row.names(.), -correlation), y = correlation, fill = correlation)) + 
+  geom_bar(stat='identity', colour = 'black') + scale_fill_continuous(guide = FALSE) + scale_y_continuous(limits =  c(-.15,.25)) +
+  labs(title = 'bandgap_energy_ev_modified\n Correlations', x = NULL, y = NULL) + coord_flip() -> cor22
+
+grid.arrange(cor11, cor22, nrow = 1)
+
+rf.train.formation.1 <- data.combined[1:2400, c("lattice_angle_gamma_rad", "percent_atom_ga","lattice_vector_3_ang","spacegroup")]
+rf.label.formation <- train.modified$formation_energy_ev_natom
+
+set.seed(1234)
+rf.formation.1 <- randomForest(x = rf.train.formation.1, y = rf.label.formation, importance = TRUE, ntree = 1000)
+rf.formation.1
+varImpPlot(rf.formation.1)
+
+rf.train.formation.2 <- data.combined[1:2400, c("lattice_angle_gamma_rad", "percent_atom_ga","lattice_vector_3_ang","spacegroup","number_of_total_atoms","percent_atom_al","percent_atom_in","lattice_vector_1_ang","lattice_vector_2_ang","lattice_angle_alpha_rad","lattice_angle_beta_rad","EA_avg","IP_avg","En_avg","HOMO_avg","LUMO_avg","mass_avg","rdmax_avg","rpmax_avg","rsmax_avg","vol","density")]
+rf.label.formation <- train.modified$formation_energy_ev_natom
+
+set.seed(1234)
+rf.formation.2 <- randomForest(x = rf.train.formation.2, y = rf.label.formation, importance = TRUE, ntree = 1000)
+rf.formation.2
+varImpPlot(rf.formation.2)
+
+test.submit.df <- data.combined[2401:3000,c("lattice_angle_gamma_rad", "percent_atom_ga","lattice_vector_3_ang","spacegroup","number_of_total_atoms","percent_atom_al","percent_atom_in","lattice_vector_1_ang","lattice_vector_2_ang","lattice_angle_alpha_rad","lattice_angle_beta_rad","EA_avg","IP_avg","En_avg","HOMO_avg","LUMO_avg","mass_avg","rdmax_avg","rpmax_avg","rsmax_avg","vol","density")]
+
+# Make predictions
+rf.2.formation.preds <- predict(rf.formation.2, test.submit.df)
+table(rf.2.formation.preds)
+
+# Write out a CSV file for submission to Kaggle
+submit.df <- data.frame(id = rep(1:600), formation_energy_ev_natom=rf.2.formation.preds)
+
+
+rf.train.bandgap.2 <- data.combined[1:2400, c("lattice_angle_gamma_rad", "percent_atom_ga","lattice_vector_3_ang","spacegroup","number_of_total_atoms","percent_atom_al","percent_atom_in","lattice_vector_1_ang","lattice_vector_2_ang","lattice_angle_alpha_rad","lattice_angle_beta_rad","EA_avg","IP_avg","En_avg","HOMO_avg","LUMO_avg","mass_avg","rdmax_avg","rpmax_avg","rsmax_avg","vol","density")]
+rf.label.bandgap <- train.modified$bandgap_energy_ev
+
+
+set.seed(1234)
+rf.bandgap.2 <- randomForest(x = rf.train.bandgap.2, y = rf.label.bandgap, importance = TRUE, ntree = 1000)
+rf.bandgap.2
+varImpPlot(rf.bandgap.2)
+
+# Make predictions
+rf.2.bandgap.preds <- predict(rf.bandgap.2, test.submit.df)
+table(rf.2.bandgap.preds)
+
+# Write out a CSV file for submission to Kaggle
+submit.df <- data.frame(id = rep(1:600), formation_energy_ev_natom=rf.2.formation.preds,bandgap_energy_ev=rf.2.bandgap.preds)
+
+write.csv(submit.df,file="Nomad_SUB_12272017_1.csv",row.names = FALSE)
+
+rf.train.bandgap.1 <- data.combined[1:2400, c("lattice_angle_gamma_rad", "percent_atom_ga","lattice_vector_3_ang","spacegroup")]
+rf.label.bandgap <- train.modified$bandgap_energy_ev
+
+set.seed(1234)
+rf.bandgap.1 <- randomForest(x = rf.train.bandgap.1, y = rf.label.bandgap, importance = TRUE, ntree = 1000)
+rf.bandgap.1
+varImpPlot(rf.bandgap.1)
+
+test.submit.df <- data.combined[2401:3000,c("lattice_angle_gamma_rad", "percent_atom_ga","lattice_vector_3_ang","spacegroup")]
+# Make predictions
+rf.1.formation.preds <- predict(rf.formation.1, test.submit.df)
+table(rf.1.formation.preds)
+
+# Write out a CSV file for submission to Kaggle
+submit.new.df <- data.frame(id = rep(1:600), formation_energy_ev_natom=rf.1.formation.preds)
+
+# Make predictions
+rf.1.bandgap.preds <- predict(rf.bandgap.1, test.submit.df)
+table(rf.1.bandgap.preds)
+
+# Write out a CSV file for submission to Kaggle
+submit.new.df <- data.frame(id = rep(1:600),formation_energy_ev_natom=rf.1.formation.preds, bandgap_energy_ev=rf.1.bandgap.preds)
+write.csv(submit.new.df,file="Nomad_SUB_12272017_2.csv",row.names = FALSE)
